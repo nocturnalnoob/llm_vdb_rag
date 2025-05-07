@@ -87,6 +87,11 @@ class AnimeImageSearch:
             
             # Format results
             character_results = []
+            
+            # Process each result synchronously
+            import requests
+            import time
+            
             for doc, dist, metadata in zip(
                 results['documents'][0], 
                 results['distances'][0],
@@ -96,11 +101,32 @@ class AnimeImageSearch:
                 similarity = 1 - (dist / 2)  # Assuming normalized distance
                 
                 if similarity >= threshold:
+                    # Get Jikan data synchronously
+                    search_name = doc.replace(',', '').strip()
+                    try:
+                        # Rate limiting
+                        time.sleep(0.25)  # Wait between API calls
+                        response = requests.get(f"https://api.jikan.moe/v4/characters?q={search_name}&limit=1")
+                        jikan_data = None
+                        if response.status_code == 200:
+                            data = response.json()
+                            if data.get('data') and len(data['data']) > 0:
+                                jikan_data = {
+                                    'mal_id': data['data'][0]['mal_id'],
+                                    'url': data['data'][0]['url'],
+                                    'image_url': data['data'][0]['images']['jpg']['image_url'],
+                                    'name': data['data'][0]['name']
+                                }
+                    except Exception as e:
+                        print(f"Error fetching Jikan data for {search_name}: {e}")
+                        jikan_data = None
+                    
                     character_results.append({
                         'character_name': doc,
                         'image_id': doc.replace(' ', '_'),
                         'similarity_score': similarity,
-                        'metadata': metadata
+                        'metadata': metadata,
+                        'jikan_data': jikan_data
                     })
                     
             return character_results
@@ -126,6 +152,7 @@ class AnimeImageSearch:
                             json.dump(data , f , indent=4)
                         if data['data']:
                             return {
+                                
                                 'mal_id': data['data'][0]['mal_id'],
                                 'url': data['data'][0]['url'],
                                 'image_url': data['data'][0]['images']['jpg']['image_url'],
@@ -172,6 +199,9 @@ class AnimeImageSearch:
             )
             
             character_results = []
+            import requests
+            import time
+            
             for doc, dist, metadata in zip(
                 results['documents'][0], 
                 results['distances'][0],
@@ -179,11 +209,32 @@ class AnimeImageSearch:
             ):
                 similarity = 1 - (dist / 2)
                 if similarity >= threshold:
+                    # Get Jikan data synchronously
+                    search_name = doc.replace(',', '').strip()
+                    try:
+                        # Rate limiting
+                        time.sleep(0.25)  # Wait between API calls
+                        response = requests.get(f"https://api.jikan.moe/v4/characters?q={search_name}&limit=1")
+                        jikan_data = None
+                        if response.status_code == 200:
+                            data = response.json()
+                            if data.get('data') and len(data['data']) > 0:
+                                jikan_data = {
+                                    'mal_id': data['data'][0]['mal_id'],
+                                    'url': data['data'][0]['url'],
+                                    'image_url': data['data'][0]['images']['jpg']['image_url'],
+                                    'name': data['data'][0]['name']
+                                }
+                    except Exception as e:
+                        print(f"Error fetching Jikan data for {search_name}: {e}")
+                        jikan_data = None
+                        
                     character_results.append({
                         'character_name': doc,
                         'image_id': doc.replace(' ', '_'),
                         'similarity_score': similarity,
-                        'metadata': metadata
+                        'metadata': metadata,
+                        'jikan_data': jikan_data
                     })
                     
             return character_results

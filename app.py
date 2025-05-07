@@ -4,7 +4,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-from PIL import Image
+from PIL import Image 
 import io
 from semantic_search import AnimeImageSearch
 
@@ -21,8 +21,6 @@ THUMBNAILS_DIR = os.path.join(os.path.dirname(__file__), "thumbnails")
 # Create thumbnails directory if it doesn't exist
 os.makedirs(THUMBNAILS_DIR, exist_ok=True)
 
-# Make a folder to save images
-os.makedirs("images_from_web", exist_ok=True)
 def create_thumbnail(image_path, thumbnail_path, size=(200, 200)):
     """Create a thumbnail for an image if it doesn't exist"""
     if not os.path.exists(thumbnail_path):
@@ -37,8 +35,12 @@ def text_search():
         if not data or 'query' not in data:
             return jsonify({'error': 'No query provided'}), 400
 
+        # Get optional parameters with defaults
+        top_k = data.get('top_k', 5)
+        threshold = data.get('threshold', 0.0)
+
         # Perform text search
-        results = searcher.search(data['query'], top_k=5)
+        results = searcher.search(data['query'], top_k=top_k, threshold=threshold)
         
         # Format results
         formatted_results = []
@@ -52,9 +54,10 @@ def text_search():
                 create_thumbnail(image_path, thumbnail_path)
                 
             formatted_results.append({
-                'name': result['character_name'],
+                'name': result['jikan_data']['name'] if result.get('jikan_data') else result['character_name'],
                 'score': result['similarity_score'],
-                'id': f"{image_id}.jpg"
+                'id': f"{image_id}.jpg",
+                'jikan_data': result.get('jikan_data')
             })
 
         return jsonify({'results': formatted_results})
@@ -72,11 +75,15 @@ def image_search():
         if file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
 
+        # Get optional parameters with defaults
+        top_k = int(request.form.get('top_k', 5))
+        threshold = float(request.form.get('threshold', 0.0))
+
         # Read and process the image
         image_bytes = file.read()
-        results = searcher.search_by_image(image_bytes, top_k=5)
+        results = searcher.search_by_image(image_bytes, top_k=top_k, threshold=threshold)
         
-        # Format results (similar to text search)
+        # Format results
         formatted_results = []
         for result in results:
             image_id = result['image_id']
@@ -87,9 +94,10 @@ def image_search():
                 create_thumbnail(image_path, thumbnail_path)
                 
             formatted_results.append({
-                'name': result['character_name'],
+                'name': result['jikan_data']['name'] if result.get('jikan_data') else result['character_name'],
                 'score': result['similarity_score'],
-                'id': f"{image_id}.jpg"
+                'id': f"{image_id}.jpg",
+                'jikan_data': result.get('jikan_data')
             })
 
         return jsonify({'results': formatted_results})
@@ -100,5 +108,6 @@ def image_search():
 @app.route('/thumbnails/<path:filename>')
 def serve_thumbnail(filename):
     return send_from_directory(THUMBNAILS_DIR, filename)
+
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

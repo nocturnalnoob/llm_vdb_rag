@@ -10,8 +10,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# Custom CSS to improve the design
 st.markdown("""
     <style>
     .main {
@@ -37,29 +35,68 @@ st.markdown("""
         background-color: #ffffff;
         box-shadow: 0 0 0 2px #FF4B4B;
     }
-    div.css-1kyxreq.e115fcil2 {
-        justify-content: center;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
+    /* Grid layout improvements */
+    .grid-container {
+        display: grid;
+        gap: 2rem;
+        padding: 1rem;
     }
     .result-card {
-        padding: 1rem;
+        background: white;
+        border-radius: 15px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+        transition: transform 0.2s;
+        height: 100%;
+    }
+    .result-card:hover {
+        transform: translateY(-5px);
+    }
+    .result-image {
+        width: 100%;
+        height: 300px;
+        object-fit: cover;
         border-radius: 10px;
-        background-color: #f0f2f6;
         margin-bottom: 1rem;
     }
-    .search-header {
-        text-align: center;
-        padding: 2rem 0;
-        background: linear-gradient(90deg, #FF4B4B 0%, #FF9B9B 100%);
-        color: white;
-        border-radius: 10px;
-        margin-bottom: 2rem;
+    .result-content {
+        padding: 1rem;
     }
-    /* Style for help text */
-    .stTextInput>div>div>div>small {
-        color: #666666 !important;
+    .character-name {
+        font-size: 1.2rem;
+        font-weight: bold;
+        color: #FF4B4B;
+        margin-bottom: 0.5rem;
+        text-align: center;
+    }
+    .similarity-score {
+        padding: 0.5rem;
+        border-radius: 5px;
+        text-align: center;
+        font-weight: bold;
+        margin: 0.5rem 0;
+    }
+    .details-section {
+        margin-top: 1rem;
+        padding: 1rem;
+        background: #f8f9fa;
+        border-radius: 10px;
+    }
+    /* Make columns equal width */
+    div[data-testid="column"] {
+        width: calc(33.33% - 1.33rem) !important;
+        padding: 0.5rem !important;
+    }
+    /* Responsive grid adjustments */
+    @media (max-width: 768px) {
+        div[data-testid="column"] {
+            width: calc(50% - 1rem) !important;
+        }
+    }
+    @media (max-width: 480px) {
+        div[data-testid="column"] {
+            width: 100% !important;
+        }
     }
     </style>
     """, unsafe_allow_html=True)
@@ -75,30 +112,73 @@ def display_results(results):
         st.warning("No results found 😕")
         return
     
-    # Create a 3-column grid
-    cols = st.columns(3)
+    # Calculate number of rows needed for 3 columns
+    num_results = len(results)
+    num_rows = (num_results + 2) // 3  # Round up division
     
-    # Display results in grid with cards
-    for idx, result in enumerate(results):
-        col = cols[idx % 3]
-        with col:
-            with st.container():
-                st.markdown(f"""
-                    <div class="result-card">
-                        <h3 style='text-align: center; color: #FF4B4B;'>{result['name']}</h3>
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                # Display image with enhanced styling
-                image_url = f"{FLASK_API}/thumbnails/{result['id']}"
-                try:
-                    st.image(
-                        image_url, 
-                        caption=f"Similarity: {result['score']:.2%}",
-                        use_container_width=True
-                    )
-                except Exception as e:
-                    st.error(f"Error loading image: {str(e)}")
+    for row in range(num_rows):
+        # Create a row with 3 columns
+        cols = st.columns(3)
+        
+        for col_idx in range(3):
+            result_idx = row * 3 + col_idx
+            if result_idx < num_results:
+                result = results[result_idx]
+                with cols[col_idx]:
+                    with st.container():
+                        # Card container
+                        st.markdown('<div class="result-card">', unsafe_allow_html=True)
+                        
+                        # Character name header
+                        display_name = result['jikan_data']['name'] if result.get('jikan_data') else result['name']
+                        st.markdown(f'<div class="character-name">{display_name}</div>', unsafe_allow_html=True)
+                        
+                        # Image display
+                        image_url = f"{FLASK_API}/thumbnails/{result['id']}"
+                        try:
+                            st.image(
+                                image_url,
+                                use_container_width=True,
+                                output_format="JPEG",
+                                clamp=True  # Ensures consistent color range
+                            )
+                            
+                            # Similarity score with color coding
+                            score = result['score']
+                            color = '#28a745' if score > 0.7 else '#ffc107' if score > 0.5 else '#dc3545'
+                            st.markdown(f"""
+                                <div class="similarity-score" style="background-color: {color}; color: white;">
+                                    Similarity: {score:.1%}
+                                </div>
+                            """, unsafe_allow_html=True)
+                            
+                            # MAL link if available
+                            if result.get('jikan_data'):
+                                mal_url = result['jikan_data']['url']
+                                st.markdown(f"""
+                                    <div style="text-align: center;">
+                                        <a href="{mal_url}" target="_blank" 
+                                           style="text-decoration: none; color: #FF4B4B;">
+                                            View on MAL 🔗
+                                        </a>
+                                    </div>
+                                """, unsafe_allow_html=True)
+                                
+                                # Expandable details section
+                                with st.expander("Details 📝"):
+                                    st.markdown(f"""
+                                        <div class="details-section">
+                                            <p><strong>MAL ID:</strong> {result['jikan_data']['mal_id']}</p>
+                                            <p><strong>Official Name:</strong> {result['jikan_data']['name']}</p>
+                                            <p><strong>Database Name:</strong> {result['name']}</p>
+                                        </div>
+                                    """, unsafe_allow_html=True)
+                                    
+                        except Exception as e:
+                            st.error(f"Error loading image: {str(e)}")
+                        
+                        # Close card container
+                        st.markdown('</div>', unsafe_allow_html=True)
 
 def main():
     # Sidebar for app navigation and filters
