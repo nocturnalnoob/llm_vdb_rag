@@ -2,3 +2,7 @@ chroma_db/
 images/
 __pycache_/
 random/
+chroma_last/
+images_clean/
+*.pkl
+*.json

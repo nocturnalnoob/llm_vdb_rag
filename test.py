@@ -6,7 +6,7 @@ chroma_client = chromadb.PersistentClient(path="./chroma_last")
 collection = chroma_client.get_or_create_collection(name="anime_clip_embeddings")
 res = collection.peek()
 print(collection.get(
-    ids=["(Fake),_Ryuubi","003"] ,
+    documents=["Abashiri"] ,
     include=['embeddings','documents']
 ))
 # Convert ndarrays to lists
