@@ -1,9 +1,10 @@
+import aiohttp
+import asyncio
+from typing import Dict, Any , List , Tuple
 from transformers import CLIPProcessor, CLIPModel
 import torch
 import chromadb
 import numpy as np
-from typing import List, Tuple, Optional
-
 class AnimeImageSearch:
     def __init__(self, model_name: str = "openai/clip-vit-large-patch14-336"):
         # Initialize device (CUDA if available, else CPU)
@@ -12,7 +13,7 @@ class AnimeImageSearch:
         
         # Load CLIP model and processor
         self.model = CLIPModel.from_pretrained(model_name).to(self.device)
-        self.processor = CLIPProcessor.from_pretrained(model_name , use_fast=True)
+        self.processor = CLIPProcessor.from_pretrained(model_name)
         self.model.eval()
         
         # Initialize ChromaDB
@@ -56,22 +57,76 @@ class AnimeImageSearch:
             
         return character_results
 
+
+    async def get_character_info(self, character_name: str) -> Dict[Any, Any]:
+        """Fetch character information from Jikan API"""
+        # Clean up the name for search
+        search_name = character_name.replace(',', '').strip()
+        
+        async with aiohttp.ClientSession() as session:
+            # Use Jikan v4 API
+            url = f"https://api.jikan.moe/v4/characters?q={search_name}&limit=1"
+            try:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        import json
+                        with open("data.json" , "w") as f:
+                            json.dump(data , f , indent=4)
+                        if data['data']:
+                            return {
+                                'mal_id': data['data'][0]['mal_id'],
+                                'url': data['data'][0]['url'],
+                                'image_url': data['data'][0]['images']['jpg']['image_url'],
+                                'name': data['data'][0]['name']
+                            }
+            except Exception as e:
+                print(f"Error fetching data for {character_name}: {e}")
+            return None
+
+    async def search_with_jikan(self, query: str, top_k: int = 5):
+        """Search characters and enrich results with Jikan data"""
+        base_results = self.search(query, top_k)
+        enriched_results = []
+
+        # Need to rate limit Jikan API calls (4 requests/second)
+        for char_name, image_id, score in base_results:
+            # Wait 0.25 seconds between requests
+            await asyncio.sleep(0.25)
+            jikan_data = await self.get_character_info(char_name)
+            
+            enriched_results.append({
+                'character_name': char_name,
+                'image_id': image_id,
+                'similarity_score': score,
+                'jikan_data': jikan_data
+            })
+            
+        return enriched_results
+
 def main():
-    # Example usage
     searcher = AnimeImageSearch()
     
     # Example query
-    query = "red hair boy who looks like Akibara renji and has goggles on face"
-    results = searcher.search(query, top_k=5)
+    query = "a small boy with a big smile and green clothes"
     
-    print(f"\nSearch results for: '{query}'")
-    print("-" * 50)
-    for char_name, image_id, score in results:
-        print(f"Character: {char_name}")
-        print(f"Image: {image_id}")
-        print(f"Similarity Score: {score:.3f}")
+    # Run async search
+    async def run_search():
+        results = await searcher.search_with_jikan(query, top_k=5)
+        
+        print(f"\nSearch results for: '{query}'")
         print("-" * 50)
+        for result in results:
+            print(f"Character: {result['character_name']}")
+            print(f"Image: {result['image_id']}")
+            print(f"Similarity Score: {result['similarity_score']:.3f}")
+            if result['jikan_data']:
+                print(f"MAL Link: {result['jikan_data']['url']}")
+                print(f"MAL Image: {result['jikan_data']['image_url']}")
+            print("-" * 50)
+
+    # Run the async function
+    asyncio.run(run_search())
 
 if __name__ == "__main__":
     main()
-    
