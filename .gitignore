@@ -6,3 +6,5 @@ chroma_last/
 images_clean/
 *.pkl
 *.json
+thumbnails/
+test.py 

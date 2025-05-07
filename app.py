@@ -2,76 +2,103 @@ import requests
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from flask import Flask, request, jsonify, send_from_directory
+from flask_cors import CORS
+from PIL import Image
+import io
+from semantic_search import AnimeImageSearch
+
+app = Flask(__name__)
+CORS(app)  # Enable CORS for all routes
+
+# Initialize the search engine
+searcher = AnimeImageSearch()
+
+# Configure image directories
+IMAGES_DIR = os.path.join(os.path.dirname(__file__), "images")
+THUMBNAILS_DIR = os.path.join(os.path.dirname(__file__), "thumbnails")
+
+# Create thumbnails directory if it doesn't exist
+os.makedirs(THUMBNAILS_DIR, exist_ok=True)
 
 # Make a folder to save images
-os.makedirs("images", exist_ok=True)
+os.makedirs("images_from_web", exist_ok=True)
+def create_thumbnail(image_path, thumbnail_path, size=(200, 200)):
+    """Create a thumbnail for an image if it doesn't exist"""
+    if not os.path.exists(thumbnail_path):
+        with Image.open(image_path) as img:
+            img.thumbnail(size)
+            img.save(thumbnail_path, "JPEG")
 
-res = []
-
-# Function to handle rate-limited API fetching
-def fetch_characters(anime_id):
+@app.route('/search/text', methods=['POST'])
+def text_search():
     try:
-        r = requests.get(f'https://api.jikan.moe/v4/anime/{anime_id}/characters', timeout=10)
-        if r.status_code == 200:
-            characters = []
-            res1 = r.json()
-            for character in res1['data']:
-                img_url = character["character"]["images"]["jpg"]["image_url"]
-                name = character["character"]["name"]
-                safe_name = name.replace('/', '_').replace('\\', '_').replace(' ', '_')
-                characters.append((img_url, safe_name))
-            print(f"Fetched {len(characters)} characters from Anime ID {anime_id}")
-            return characters
-        else:
-            print(f"Anime ID {anime_id} - Status Code: {r.status_code}")
-            return []
-    except Exception as e:
-        print(f"Error fetching Anime ID {anime_id}: {e}")
-        return []
+        data = request.get_json()
+        if not data or 'query' not in data:
+            return jsonify({'error': 'No query provided'}), 400
 
-# Function to download images
-def download_image(item):
-    img_url, name = item
-    try:
-        img_data = requests.get(img_url, timeout=10).content
-        with open(f"images/{name}.jpg", 'wb') as handler:
-            handler.write(img_data)
-        print(f"Downloaded: {name}")
-    except Exception as e:
-        print(f"Failed to download {name}: {e}")
-
-# Step 1: Fetch all character images (parallelized)
-anime_ids = range(20000 , 30000)  # Increase range as needed, small for testing
-
-# Track time to ensure rate limiting
-start_time = time.time()
-requests_made = 0
-
-with ThreadPoolExecutor(max_workers=20) as executor:
-    futures = []
-    for anime_id in anime_ids:
-        # Ensure requests per minute limit
-        if requests_made >= 45:
-            elapsed_time = time.time() - start_time
-            if elapsed_time < 45:  # If it's less than a minute, wait
-                time_to_wait = 45 - elapsed_time
-                print(f"Rate limit reached. Sleeping for {time_to_wait} seconds...")
-                time.sleep(time_to_wait)
-                start_time = time.time()  # Reset time
-                requests_made = 0  # Reset the request counter
+        # Perform text search
+        results = searcher.search(data['query'], top_k=5)
         
-        futures.append(executor.submit(fetch_characters, anime_id))
-        requests_made += 1
-        time.sleep(1)  # Slow down to 1 request per second
-    
-    for future in as_completed(futures):
-        characters = future.result()
-        res.extend(characters)
+        # Format results
+        formatted_results = []
+        for result in results:
+            # Create thumbnail if it doesn't exist
+            image_id = result['image_id']
+            image_path = os.path.join(IMAGES_DIR, f"{image_id}.jpg")
+            thumbnail_path = os.path.join(THUMBNAILS_DIR, f"{image_id}.jpg")
+            
+            if os.path.exists(image_path):
+                create_thumbnail(image_path, thumbnail_path)
+                
+            formatted_results.append({
+                'name': result['character_name'],
+                'score': result['similarity_score'],
+                'id': f"{image_id}.jpg"
+            })
 
-print(f"\nTotal characters fetched: {len(res)}\n")
+        return jsonify({'results': formatted_results})
 
-# Step 2: Download all images (parallelized)
-with ThreadPoolExecutor(max_workers=20) as executor:
-    executor.map(download_image, res)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-print(f"\n🎯 Downloaded {len(res)} images successfully!")
+@app.route('/search/image', methods=['POST'])
+def image_search():
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+
+        # Read and process the image
+        image_bytes = file.read()
+        results = searcher.search_by_image(image_bytes, top_k=5)
+        
+        # Format results (similar to text search)
+        formatted_results = []
+        for result in results:
+            image_id = result['image_id']
+            image_path = os.path.join(IMAGES_DIR, f"{image_id}.jpg")
+            thumbnail_path = os.path.join(THUMBNAILS_DIR, f"{image_id}.jpg")
+            
+            if os.path.exists(image_path):
+                create_thumbnail(image_path, thumbnail_path)
+                
+            formatted_results.append({
+                'name': result['character_name'],
+                'score': result['similarity_score'],
+                'id': f"{image_id}.jpg"
+            })
+
+        return jsonify({'results': formatted_results})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/thumbnails/<path:filename>')
+def serve_thumbnail(filename):
+    return send_from_directory(THUMBNAILS_DIR, filename)
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)

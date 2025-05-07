@@ -1,24 +1,31 @@
 import aiohttp
 import asyncio
-from typing import Dict, Any , List , Tuple
+from typing import Dict, Any , List , Tuple, Optional
 from transformers import CLIPProcessor, CLIPModel
 import torch
 import chromadb
 import numpy as np
+from PIL import Image
+import io
+
 class AnimeImageSearch:
     def __init__(self, model_name: str = "openai/clip-vit-large-patch14-336"):
         # Initialize device (CUDA if available, else CPU)
-        self.device = "xpu" if torch.xpu.is_available() else "cpu"
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"Using device: {self.device}")
         
-        # Load CLIP model and processor
-        self.model = CLIPModel.from_pretrained(model_name).to(self.device)
-        self.processor = CLIPProcessor.from_pretrained(model_name)
-        self.model.eval()
-        
-        # Initialize ChromaDB
-        self.chroma_client = chromadb.PersistentClient(path="./chroma_last")
-        self.collection = self.chroma_client.get_collection("anime_clip_embeddings")
+        try:
+            # Load CLIP model and processor
+            self.model = CLIPModel.from_pretrained(model_name).to(self.device)
+            self.processor = CLIPProcessor.from_pretrained(model_name)
+            self.model.eval()
+            
+            # Initialize ChromaDB
+            self.chroma_client = chromadb.PersistentClient(path="./chroma_last")
+            self.collection = self.chroma_client.get_collection("anime_clip_embeddings")
+            print(f"Successfully loaded collection with {self.collection.count()} entries")
+        except Exception as e:
+            raise RuntimeError(f"Failed to initialize search: {e}")
 
     def encode_text(self, text: str) -> List[float]:
         """Encode text query into CLIP embedding"""
@@ -33,30 +40,74 @@ class AnimeImageSearch:
         normalized_embedding = embedding / np.linalg.norm(embedding)
         return normalized_embedding.tolist()
 
-    def search(self, query: str, top_k: int = 5) -> List[Tuple[str, str, float]]:
+    def encode_image(self, image_bytes: bytes) -> Optional[List[float]]:
+        """Encode image into CLIP embedding"""
+        try:
+            # Convert bytes to PIL Image
+            image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+            
+            # Process image
+            inputs = self.processor(images=image, return_tensors="pt")
+            inputs = {k: v.to(self.device) for k, v in inputs.items()}
+            
+            # Get image features
+            with torch.no_grad():
+                image_features = self.model.get_image_features(**inputs)
+                
+            # Move to CPU and normalize
+            embedding = image_features[0].cpu().numpy()
+            normalized_embedding = embedding / np.linalg.norm(embedding)
+            return normalized_embedding.tolist()
+        except Exception as e:
+            print(f"Error encoding image: {e}")
+            return None
+
+    def search(self, query: str, top_k: int = 5, threshold: float = 0.0) -> List[dict]:
         """
         Search for anime characters based on text description
-        Returns: List of (character_name, image_filename, similarity_score)
+        Args:
+            query: Text description to search for
+            top_k: Number of results to return
+            threshold: Minimum similarity score threshold
+        Returns:
+            List of dicts containing character info and scores
         """
-        # Encode query text
-        query_embedding = self.encode_text(query)
-        
-        # Query ChromaDB
-        results = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=top_k,
-            include=["documents", "distances"]
-        )
-        
-        # Format results
-        character_results = []
-        for doc, dist in zip(results['documents'][0], results['distances'][0]):
-            # Convert distance to similarity score (1 - normalized_distance)
-            similarity = 1 - (dist / 2)  # Assuming normalized distance
-            character_results.append((doc, doc.replace(' ', '_'), similarity))
+        try:
+            # Encode query text
+            query_embedding = self.encode_text(query)
+            if query_embedding is None:
+                return []
             
-        return character_results
-
+            # Query ChromaDB
+            results = self.collection.query(
+                query_embeddings=[query_embedding],
+                n_results=top_k,
+                include=["documents", "distances", "metadatas"]
+            )
+            
+            # Format results
+            character_results = []
+            for doc, dist, metadata in zip(
+                results['documents'][0], 
+                results['distances'][0],
+                results['metadatas'][0] if results.get('metadatas') else [{}] * len(results['documents'][0])
+            ):
+                # Convert distance to similarity score
+                similarity = 1 - (dist / 2)  # Assuming normalized distance
+                
+                if similarity >= threshold:
+                    character_results.append({
+                        'character_name': doc,
+                        'image_id': doc.replace(' ', '_'),
+                        'similarity_score': similarity,
+                        'metadata': metadata
+                    })
+                    
+            return character_results
+            
+        except Exception as e:
+            print(f"Error performing search: {e}")
+            return []
 
     async def get_character_info(self, character_name: str) -> Dict[Any, Any]:
         """Fetch character information from Jikan API"""
@@ -103,6 +154,43 @@ class AnimeImageSearch:
             })
             
         return enriched_results
+
+    def search_by_image(self, 
+                       image_bytes: bytes, 
+                       top_k: int = 5,
+                       threshold: float = 0.0) -> List[dict]:
+        """Image-based search for anime characters"""
+        try:
+            query_embedding = self.encode_image(image_bytes)
+            if query_embedding is None:
+                return []
+            
+            results = self.collection.query(
+                query_embeddings=[query_embedding],
+                n_results=top_k,
+                include=["documents", "distances", "metadatas"]
+            )
+            
+            character_results = []
+            for doc, dist, metadata in zip(
+                results['documents'][0], 
+                results['distances'][0],
+                results['metadatas'][0] if results.get('metadatas') else [{}] * len(results['documents'][0])
+            ):
+                similarity = 1 - (dist / 2)
+                if similarity >= threshold:
+                    character_results.append({
+                        'character_name': doc,
+                        'image_id': doc.replace(' ', '_'),
+                        'similarity_score': similarity,
+                        'metadata': metadata
+                    })
+                    
+            return character_results
+            
+        except Exception as e:
+            print(f"Error performing image search: {e}")
+            return []
 
 def main():
     searcher = AnimeImageSearch()
