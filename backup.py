@@ -36,9 +36,9 @@ def load_and_process_image(image_path: str, processor: CLIPProcessor, model: CLI
     except Exception as e:
         print(f"Error processing {image_path}: {str(e)}")
         return None
-
+    
 def main():
-    model_name = "cyborgpunk/anime_2"
+    model_name = "openai/clip-vit-base-patch32"
     processor = CLIPProcessor.from_pretrained(model_name, use_fast=True)
     model = CLIPModel.from_pretrained(model_name)
 
