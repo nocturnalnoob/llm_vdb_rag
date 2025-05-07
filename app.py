@@ -51,10 +51,10 @@ with ThreadPoolExecutor(max_workers=20) as executor:
     futures = []
     for anime_id in anime_ids:
         # Ensure requests per minute limit
-        if requests_made >= 40:
+        if requests_made >= 45:
             elapsed_time = time.time() - start_time
-            if elapsed_time < 40:  # If it's less than a minute, wait
-                time_to_wait = 40 - elapsed_time
+            if elapsed_time < 45:  # If it's less than a minute, wait
+                time_to_wait = 45 - elapsed_time
                 print(f"Rate limit reached. Sleeping for {time_to_wait} seconds...")
                 time.sleep(time_to_wait)
                 start_time = time.time()  # Reset time
