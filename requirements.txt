@@ -1,9 +1,20 @@
+# Core dependencies
+streamlit>=1.28.0,<1.36.0
 transformers==4.35.2
 torch==2.1.1
-chromadb
+chromadb==1.0.8
 numpy==1.24.3
 Pillow==9.4.0
-huggingface-hub
+huggingface-hub>=0.19.0,<0.32.0
 requests==2.31.0
-sqlite3
-streamlit
+
+# Additional required packages
+aiohttp==3.9.1
+python-multipart>=0.0.6
+typing-extensions>=4.5.0
+safetensors>=0.3.0
+accelerate>=0.20.0
+onnxruntime>=1.15.0
+tqdm>=4.65.0
+pydantic>=1.10.8,<2.0.0  # chromadb requires pydantic v1
+fsspec>=2023.6.0
