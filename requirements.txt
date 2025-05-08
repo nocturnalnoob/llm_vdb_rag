@@ -7,3 +7,4 @@ streamlit==1.29.0
 huggingface-hub==0.19.4
 requests==2.31.0
 tqdm==4.65.0
+sqlite3>=3.35.0
