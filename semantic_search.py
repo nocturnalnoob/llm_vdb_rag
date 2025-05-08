@@ -2,6 +2,16 @@ import os
 os.environ['TORCH_USE_CUDA_DSA'] = '0'
 os.environ['PYTORCH_JIT'] = '0'
 os.environ['TORCH_DISABLE_GPU_DIAGNOSTICS'] = '1'
+import os
+import sys
+
+# Try to use pysqlite3 if available
+try:
+    __import__('pysqlite3')
+    sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+    print("Successfully loaded pysqlite3 as a replacement for sqlite3")
+except ImportError:
+    print("pysqlite3 not available, using system sqlite3")
 
 import torch
 torch.set_grad_enabled(False)
