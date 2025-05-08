@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 from PIL import Image
 import io
+import os
 
 # Configure page with custom theme and layout
 st.set_page_config(
@@ -183,7 +184,7 @@ def display_results(results):
 def main():
     # Sidebar for app navigation and filters
     with st.sidebar:
-        st.image(r"D:\llm\anime-style-mythical-dragon-creature.jpg", use_container_width=True)
+        st.image("anime-style-mythical-dragon-creature.jpg", use_column_width=True)
         st.markdown("## 🎮 Search Options")
         search_type = st.radio(
             "Choose your search method:",
