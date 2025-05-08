@@ -1,31 +1,72 @@
-import aiohttp
-import asyncio
-from typing import Dict, Any , List , Tuple, Optional
-from transformers import CLIPProcessor, CLIPModel
+import os
+os.environ['TORCH_USE_CUDA_DSA'] = '0'
+os.environ['PYTORCH_JIT'] = '0'
+os.environ['TORCH_DISABLE_GPU_DIAGNOSTICS'] = '1'
+
 import torch
+torch.set_grad_enabled(False)
+
+from typing import Dict, Any, List, Optional
+from transformers import CLIPProcessor, CLIPModel
 import chromadb
 import numpy as np
 from PIL import Image
 import io
+from huggingface_hub import hf_hub_download
+import tempfile
+import zipfile
+import requests
+import time
 
 class AnimeImageSearch:
     def __init__(self, model_name: str = "openai/clip-vit-large-patch14-336"):
-        # Initialize device (CUDA if available, else CPU)
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"Using device: {self.device}")
-        
+        """Initialize the anime image search engine with CLIP model and ChromaDB"""
         try:
+            # Force torch to initialize its C++ modules first
+            _ = torch.zeros(1)
+            
+            # Initialize device (CUDA if available, else CPU)
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+            print(f"Using device: {self.device}")
+            
             # Load CLIP model and processor
-            self.model = CLIPModel.from_pretrained(model_name).to(self.device)
-            self.processor = CLIPProcessor.from_pretrained(model_name)
+            self.model = CLIPModel.from_pretrained(model_name, local_files_only=False).to(self.device)
+            self.processor = CLIPProcessor.from_pretrained(model_name, local_files_only=False)
             self.model.eval()
             
-            # Initialize ChromaDB
-            self.chroma_client = chromadb.PersistentClient(path="./chroma_last")
-            self.collection = self.chroma_client.get_collection("anime_clip_embeddings")
-            print(f"Successfully loaded collection with {self.collection.count()} entries")
+            # Download and setup ChromaDB if not exists
+            self._setup_chroma_db()
+            
         except Exception as e:
+            print(f"Error during initialization: {str(e)}")
             raise RuntimeError(f"Failed to initialize search: {e}")
+    
+    def _setup_chroma_db(self):
+        """Setup ChromaDB, downloading from HuggingFace if necessary"""
+        if not os.path.exists("./chroma_last"):
+            print("Downloading ChromaDB from HuggingFace...")
+            try:
+                # Create a temporary directory for download
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    # Download the database file from HuggingFace
+                    db_path = hf_hub_download(
+                        repo_id="cyborgpunk/sample",
+                        filename="chroma_last.zip",
+                        repo_type="dataset"
+                    )
+                    
+                    # Extract the zip file
+                    with zipfile.ZipFile(db_path, 'r') as zip_ref:
+                        zip_ref.extractall("./")
+                    
+                print("Successfully downloaded and extracted ChromaDB!")
+            except Exception as e:
+                raise RuntimeError(f"Failed to download ChromaDB: {e}")
+        
+        # Initialize ChromaDB client
+        self.chroma_client = chromadb.PersistentClient(path="./chroma_last")
+        self.collection = self.chroma_client.get_collection("anime_clip_embeddings")
+        print(f"Successfully loaded collection with {self.collection.count()} entries")
 
     def encode_text(self, text: str) -> List[float]:
         """Encode text query into CLIP embedding"""

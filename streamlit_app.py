@@ -1,111 +1,47 @@
+import os
+os.environ['TORCH_USE_CUDA_DSA'] = '0'
+os.environ['PYTORCH_JIT'] = '0'  # Disable JIT to avoid class registration issues
+os.environ['TORCH_DISABLE_GPU_DIAGNOSTICS'] = '1'
+
+# Initialize pytorch first
+import torch
+torch.set_grad_enabled(False)
+
 import streamlit as st
-import requests
 from PIL import Image
 import io
-import os
-
-# Configure page with custom theme and layout
+from semantic_search import AnimeImageSearch
+torch.classes.__path__= []
+# Configure page settings at the very start
 st.set_page_config(
     page_title="Anime Character Search Engine",
     page_icon="🎯",
     layout="wide",
     initial_sidebar_state="expanded"
 )
-st.markdown("""
-    <style>
-    .main {
-        padding: 2rem;
-    }
-    .stButton>button {
-        width: 100%;
-        margin-top: 1rem;
-        background-color: #FF4B4B;
-        color: white;
-    }
-    /* Styling for text input and placeholder */
-    .stTextInput>div>div>input {
-        background-color: #f0f2f6;
-        color: #31333F !important;
-    }
-    .stTextInput>div>div>input::placeholder {
-        color: #666666 !important;
-        opacity: 0.8;
-    }
-    /* Ensure input text is clearly visible when typing */
-    .stTextInput>div>div>input:focus {
-        background-color: #ffffff;
-        box-shadow: 0 0 0 2px #FF4B4B;
-    }
-    /* Grid layout improvements */
-    .grid-container {
-        display: grid;
-        gap: 2rem;
-        padding: 1rem;
-    }
-    .result-card {
-        background: white;
-        border-radius: 15px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        overflow: hidden;
-        transition: transform 0.2s;
-        height: 100%;
-    }
-    .result-card:hover {
-        transform: translateY(-5px);
-    }
-    .result-image {
-        width: 100%;
-        height: 300px;
-        object-fit: cover;
-        border-radius: 10px;
-        margin-bottom: 1rem;
-    }
-    .result-content {
-        padding: 1rem;
-    }
-    .character-name {
-        font-size: 1.2rem;
-        font-weight: bold;
-        color: #FF4B4B;
-        margin-bottom: 0.5rem;
-        text-align: center;
-    }
-    .similarity-score {
-        padding: 0.5rem;
-        border-radius: 5px;
-        text-align: center;
-        font-weight: bold;
-        margin: 0.5rem 0;
-    }
-    .details-section {
-        margin-top: 1rem;
-        padding: 1rem;
-        background: #f8f9fa;
-        border-radius: 10px;
-    }
-    /* Make columns equal width */
-    div[data-testid="column"] {
-        width: calc(33.33% - 1.33rem) !important;
-        padding: 0.5rem !important;
-    }
-    /* Responsive grid adjustments */
-    @media (max-width: 768px) {
-        div[data-testid="column"] {
-            width: calc(50% - 1rem) !important;
-        }
-    }
-    @media (max-width: 480px) {
-        div[data-testid="column"] {
-            width: 100% !important;
-        }
-    }
-    </style>
-    """, unsafe_allow_html=True)
 
-# API endpoints
-FLASK_API = "http://localhost:5000"
-TEXT_SEARCH_URL = f"{FLASK_API}/search/text"
-IMAGE_SEARCH_URL = f"{FLASK_API}/search/image"
+# Configure image directories
+IMAGES_DIR = os.path.join(os.path.dirname(__file__), "images")
+THUMBNAILS_DIR = os.path.join(os.path.dirname(__file__), "thumbnails")
+os.makedirs(THUMBNAILS_DIR, exist_ok=True)
+
+def create_thumbnail(image_path, thumbnail_path, size=(200, 200)):
+    """Create a thumbnail for an image if it doesn't exist"""
+    if not os.path.exists(thumbnail_path):
+        with Image.open(image_path) as img:
+            img.thumbnail(size)
+            img.save(thumbnail_path, "JPEG")
+
+# Initialize the search engine with proper error handling
+@st.cache_resource(show_spinner=False)
+def get_searcher():
+    try:
+        with st.spinner("Initializing search engine..."):
+            searcher = AnimeImageSearch()
+            return searcher
+    except Exception as e:
+        st.error(f"Failed to initialize search engine: {str(e)}")
+        return None
 
 def display_results(results):
     """Display search results in a grid with improved styling"""
@@ -131,21 +67,22 @@ def display_results(results):
                         st.markdown('<div class="result-card">', unsafe_allow_html=True)
                         
                         # Character name header
-                        display_name = result['jikan_data']['name'] if result.get('jikan_data') else result['name']
+                        display_name = result['jikan_data']['name'] if result.get('jikan_data') else result['character_name']
                         st.markdown(f'<div class="character-name">{display_name}</div>', unsafe_allow_html=True)
                         
-                        # Image display
-                        image_url = f"{FLASK_API}/thumbnails/{result['id']}"
+                        # Image display from Jikan API
                         try:
-                            st.image(
-                                image_url,
-                                use_container_width=True,
-                                output_format="JPEG",
-                                clamp=True  # Ensures consistent color range
-                            )
+                            if result.get('jikan_data') and result['jikan_data'].get('image_url'):
+                                st.image(
+                                    result['jikan_data']['image_url'],
+                                    use_container_width=True,
+                                    output_format="JPEG",
+                                )
+                            else:
+                                st.warning("No image available")
                             
                             # Similarity score with color coding
-                            score = result['score']
+                            score = result['similarity_score']
                             color = '#28a745' if score > 0.7 else '#ffc107' if score > 0.5 else '#dc3545'
                             st.markdown(f"""
                                 <div class="similarity-score" style="background-color: {color}; color: white;">
@@ -171,7 +108,7 @@ def display_results(results):
                                         <div class="details-section">
                                             <p><strong>MAL ID:</strong> {result['jikan_data']['mal_id']}</p>
                                             <p><strong>Official Name:</strong> {result['jikan_data']['name']}</p>
-                                            <p><strong>Database Name:</strong> {result['name']}</p>
+                                            <p><strong>Database Name:</strong> {result['character_name']}</p>
                                         </div>
                                     """, unsafe_allow_html=True)
                                     
@@ -182,6 +119,12 @@ def display_results(results):
                         st.markdown('</div>', unsafe_allow_html=True)
 
 def main():
+    # Initialize the search engine
+    searcher = get_searcher()
+    if not searcher:
+        st.error("Failed to initialize the search engine. Please try again.")
+        return
+    
     # Sidebar for app navigation and filters
     with st.sidebar:
         st.image("anime-style-mythical-dragon-creature.jpg", use_container_width=True)
@@ -193,8 +136,8 @@ def main():
         
         st.markdown("---")
         st.markdown("## ⚙️ Search Settings")
-        top_k = st.slider("Number of results", min_value=1, max_value=20, value=5)
-        threshold = st.slider("Similarity threshold", min_value=0.0, max_value=1.0, value=0.3, step=0.1)
+        top_k = st.slider("Number of results", min_value=1, max_value=20, value=6)
+        threshold = st.slider("Similarity threshold", min_value=0.0, max_value=1.0, value=0.2, step=0.1)
     
     # Main content area
     st.markdown("""
@@ -220,21 +163,14 @@ def main():
             if search_button and query:
                 with st.spinner("🎯 Searching for matching characters..."):
                     try:
-                        response = requests.post(
-                            TEXT_SEARCH_URL,
-                            json={
-                                "query": query,
-                                "top_k": top_k,
-                                "threshold": threshold
-                            }
-                        )
-                        if response.status_code == 200:
+                        results = searcher.search(query, top_k=top_k, threshold=threshold)
+                        if results:
                             st.success("✨ Found some matches!")
-                            display_results(response.json()['results'])
+                            display_results(results)
                         else:
-                            st.error(f"Error: {response.json().get('error', 'Unknown error')}")
+                            st.warning("No matches found for your query.")
                     except Exception as e:
-                        st.error(f"Error connecting to server: {str(e)}")
+                        st.error(f"Error during search: {str(e)}")
     else:
         st.markdown("### 📸 Search by Image")
         uploaded_file = st.file_uploader(
@@ -251,23 +187,16 @@ def main():
                 if st.button("🔍 Search Similar Characters", use_container_width=True):
                     with st.spinner("🎯 Finding similar characters..."):
                         try:
-                            files = {'file': ('image.jpg', uploaded_file, 'image/jpeg')}
-                            response = requests.post(
-                                IMAGE_SEARCH_URL,
-                                files=files,
-                                data={
-                                    'top_k': top_k,
-                                    'threshold': threshold
-                                }
-                            )
-                            
-                            if response.status_code == 200:
+                            # Convert uploaded file to bytes
+                            image_bytes = uploaded_file.getvalue()
+                            results = searcher.search_by_image(image_bytes, top_k=top_k, threshold=threshold)
+                            if results:
                                 st.success("✨ Found similar characters!")
-                                display_results(response.json()['results'])
+                                display_results(results)
                             else:
-                                st.error(f"Error: {response.json().get('error', 'Unknown error')}")
+                                st.warning("No similar characters found.")
                         except Exception as e:
-                            st.error(f"Error connecting to server: {str(e)}")
+                            st.error(f"Error during image search: {str(e)}")
 
     # Footer
     st.markdown("---")

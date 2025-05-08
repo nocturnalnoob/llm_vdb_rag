@@ -1,10 +1,9 @@
-transformers==4.28.1
-aiohttp
-torch>=2.0.0
+transformers==4.35.2
+torch==2.1.1
 chromadb==0.4.14
-numpy>=1.24.0
-tqdm>=4.65.0
+numpy==1.24.3
 Pillow==9.4.0
-flask==2.3.3
-flask-cors==4.0.0
-requests>=2.31.0
+streamlit==1.29.0
+huggingface-hub==0.19.4
+requests==2.31.0
+tqdm==4.65.0
